@@ -12,7 +12,7 @@ Useful for:
 
 ## Motivation
 
-LLMs are getting pretty good at writing code.
+LLMs are now pretty good at writing code and using shell commands.
 But they hit a wall with interactive stuff.
 An LLM can write you a vim macro, sure.
 But it can't actually use vim.
@@ -161,30 +161,43 @@ ln -s $(pwd)/tmuxb ~/.local/bin/tmuxb
 
 ## Usage
 
-### Basic Commands
+> [!TIP]
+> LLMs and coding agents: see [doc/agent-usage-guide.md](doc/agent-usage-guide.md) for agent-specific guidance.
+
+### Session Management
+
+Create a new session:
+```bash
+# Basic session (creates .tmuxb_session file for convenience)
+tmuxb new my-session
+
+# With custom window name and command
+tmuxb new my-session --window "editor" --cmd "vim"
+
+# With custom dimensions
+tmuxb new my-session --width 100 --height 30
+
+# Use a custom socket for isolation
+tmuxb new my-session --socket /tmp/my.sock
+```
 
 List all tmux sessions:
 ```bash
-tmuxb sessions
-tmuxb sessions --json
+tmuxb list
+tmuxb list --json
+tmuxb list --edn
 ```
 
-List windows in a session:
+Kill a session:
 ```bash
-tmuxb windows my-session
-```
-
-List panes in a session:
-```bash
-tmuxb panes my-session
-tmuxb panes my-session --window 0
+tmuxb kill my-session
 ```
 
 ### Capturing Pane Content
 
 Capture the current screen of a pane:
 ```bash
-# Basic capture with cursor position
+# Basic capture with cursor position marked
 tmuxb capture my-session
 
 # Capture specific pane
@@ -194,19 +207,44 @@ tmuxb capture my-session --pane 0
 tmuxb capture my-session --history
 
 # Capture with different style formats
-tmuxb capture my-session --style none    # Strip ANSI, show cursor
+tmuxb capture my-session --style none    # Strip ANSI, show cursor (default)
 tmuxb capture my-session --style lines   # Prefix lines based on style (>, !, *)
-tmuxb capture my-session --style tags    # Convert ANSI to tags ([b], [r], etc.)
-tmuxb capture my-session --style ansi    # Preserve ANSI codes
+tmuxb capture my-session --style tags    # Convert ANSI to inline tags ([b], [r], etc.)
+tmuxb capture my-session --style ansi    # Preserve ANSI escape codes
 
-# Raw output without cursor metadata
+# Raw output without cursor markers
 tmuxb capture my-session --raw
+
+# Only output if content changed (useful for polling)
+tmuxb capture my-session --if-changed
 ```
 
-The cursor position is marked with [Ogham][ogham] feather marks characters: `᚛` (left) and `᚜` (right).
-These which are unlikely to appear in normal terminal output.
+The cursor position is marked with [Ogham][ogham] feather marks: `᚛` (left) and `᚜` (right).
+These are unlikely to appear in normal terminal output.
 
 [ogham]: https://en.wikipedia.org/wiki/Ogham
+
+### Sending Input
+
+tmux-buddy uses an EDN-based DSL for sending input. See [doc/send-keys-dsl.md](doc/send-keys-dsl.md) for complete documentation.
+
+```bash
+# Type text and press Enter
+tmuxb send my-session '"hello world" :Enter'
+
+# Press special keys
+tmuxb send my-session ':C-c'              # Ctrl+C
+tmuxb send my-session ':Escape ":wq" :Enter'  # vim save and quit
+
+# Press a key multiple times with delay
+tmuxb send my-session '[:Down 5 :delay 100]'  # Down arrow 5 times, 100ms between
+
+# Wait between actions
+tmuxb send my-session '"make build" :Enter [:Sleep 2000] "make test" :Enter'
+
+# Read actions from stdin (useful for complex sequences)
+echo '"hello" :Enter' | tmuxb send my-session
+```
 
 ### Watching for Changes
 
@@ -218,40 +256,28 @@ tmuxb watch my-session
 # Custom interval and timeout
 tmuxb watch my-session --interval 1.0 --timeout 60
 
-# Wait until specific text appears
+# Stop when specific text appears
 tmuxb watch my-session --until "Build complete"
 ```
 
-### Sending Input
+### Listing Windows and Panes
 
-Send keys to a pane:
 ```bash
-# Send special keys
-tmuxb send my-session "C-x" "C-f"
-tmuxb send my-session "Escape" ":wq" "Enter"
+# List windows in a session
+tmuxb windows my-session
+tmuxb windows my-session --json
 
-# Send keys and press Enter
-tmuxb send my-session "ls" --enter
-
-# Send literal text (no key interpretation)
-tmuxb send my-session "Hello, world!" --literal
+# List panes in a session
+tmuxb panes my-session
+tmuxb panes my-session --window 0
+tmuxb panes my-session --edn
 ```
 
-Type text character by character:
+### Mouse Events
+
+Send mouse clicks to specific coordinates:
 ```bash
-# Type text (literal characters only)
-tmuxb type my-session "Hello, world!"
-
-# Type and press Enter
-tmuxb type my-session "npm test" --enter
-
-# Add delay between characters (in milliseconds)
-tmuxb type my-session "slow typing" --delay 100
-```
-
-Send mouse clicks:
-```bash
-# Click at coordinates (x=10, y=5)
+# Left click at coordinates (x=10, y=5)
 tmuxb mouse my-session 10 5
 
 # Right click
@@ -261,35 +287,22 @@ tmuxb mouse my-session 10 5 --click right
 tmuxb mouse my-session 10 5 --double
 ```
 
-### Session Management
-
-Create a new session:
+For more complex mouse operations (drag, scroll, modifiers), use the send command:
 ```bash
-# Basic session
-tmuxb new my-session
-
-# With custom window name and command
-tmuxb new my-session --window "editor" --cmd "vim"
-
-# With custom dimensions
-tmuxb new my-session --width 100 --height 30
+tmuxb send my-session '[:Click 50 40 :C]'     # Ctrl+click
+tmuxb send my-session '[:ScrollDown 50 40 3]' # Scroll down 3 times
 ```
 
-Kill a session:
+### Session File
+
+When you create a session with `tmuxb new`, it writes a `.tmuxb_session` file in the current directory.
+This file stores the session name and socket path, so subsequent commands can omit the session argument:
+
 ```bash
-tmuxb kill my-session
-
-# Force kill without confirmation
-tmuxb kill my-session --force
-```
-
-### JSON Output
-
-Most commands support `--json` for machine-readable output:
-```bash
-tmuxb sessions --json
-tmuxb windows my-session --json
-tmuxb panes my-session --json
+tmuxb new my-session --socket /tmp/test.sock
+tmuxb capture          # automatically uses my-session
+tmuxb send '"hello"'   # automatically uses my-session
+tmuxb kill             # automatically uses my-session
 ```
 
 ### Getting Help

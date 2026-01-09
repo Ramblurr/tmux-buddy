@@ -459,6 +459,7 @@
 
 ;; Forward declarations for cmd-help and error handling
 (declare commands)
+(declare commands-order)
 (declare get-cmd-spec)
 (declare add-help-to-spec)
 
@@ -725,7 +726,9 @@
 (defn cmd-help
   "Show help message."
   [_]
-  (let [cmd-entries (for [{:keys [name usage desc]} commands]
+  (let [cmd-by-name (into {} (map (juxt :name identity) commands))
+        ordered     (keep cmd-by-name commands-order)
+        cmd-entries (for [{:keys [name usage desc]} ordered]
                       (let [args (-> usage
                                      (str/replace #"\[?options\]?" "")
                                      (str/replace #"\s+" " ")
@@ -748,6 +751,7 @@ Commands:")
 ;;; ---------------------------------------------------------------------------
 
 ;; Command specifications with help metadata
+(def commands-order ["new" "list" "capture" "send" "watch" "windows" "panes" "mouse"])
 (def commands
   [{:name       "list"
     :usage      "[options]"
@@ -821,7 +825,7 @@ Commands:")
 
    {:name       "new"
     :usage      "NAME [options]"
-    :desc       "Create a new tmux session and .tmuxb_session file."
+    :desc       "Create a new tmux session."
     :args->opts [:name]
     :coerce     {:name :string}
     :spec       {:socket          {:alias :S :desc "tmux socket path"}

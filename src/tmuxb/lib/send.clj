@@ -333,7 +333,7 @@
 
 (defmethod execute-action :default
   [send-fn send-hex-fn action]
-  (when (vector? action)
+  (if (vector? action)
     (let [[key-kw & rest-args] action]
       (cond
         (and (keyword? key-kw)
@@ -355,7 +355,9 @@
               (Thread/sleep delay))))
 
         :else
-        (throw (ex-info "Unknown action" {:action action}))))))
+        (throw (ex-info "Unknown action" {:action action}))))
+    (throw (ex-info "Unknown action type. Strings must be quoted in EDN format."
+                    {:action action :type (type action)}))))
 
 (defn execute
   "Execute a sequence of actions.
@@ -385,6 +387,24 @@
   [send-fn send-hex-fn s]
   (with-open [rdr (PushbackReader. (java.io.StringReader. s))]
     (execute-stream send-fn send-hex-fn rdr)))
+
+(defn run-send
+  "Execute send actions with clean error handling.
+   Takes edn-str (may be blank) and stdin-reader for fallback.
+   Returns nil on success, exits with code 1 on error."
+  [send-fn send-hex-fn edn-str stdin-reader]
+  (try
+    (if (str/blank? edn-str)
+      (with-open [rdr (PushbackReader. stdin-reader)]
+        (execute-stream send-fn send-hex-fn rdr))
+      (execute-string send-fn send-hex-fn edn-str))
+    (catch clojure.lang.ExceptionInfo e
+      (binding [*out* *err*]
+        (println (str "Error: " (ex-message e)))
+        (when-let [action (:action (ex-data e))]
+          (println (str "  Got: " (pr-str action) " (type: " (type action) ")")))
+        (println "  Hint: Strings must be quoted in EDN format, e.g., '\"echo hello\"'"))
+      (System/exit 1))))
 
 (comment
   (defn mock-send [s] (println "send:" s))

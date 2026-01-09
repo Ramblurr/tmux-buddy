@@ -642,10 +642,7 @@
 
     (let [send-fn     #(send-keys* session % :pane pane)
           send-hex-fn #(send-keys-hex* session % :pane pane)]
-      (if (str/blank? edn-str)
-        (with-open [rdr (java.io.PushbackReader. *in*)]
-          (send/execute-stream send-fn send-hex-fn rdr))
-        (send/execute-string send-fn send-hex-fn edn-str)))))
+      (send/run-send send-fn send-hex-fn edn-str *in*))))
 
 (defn cmd-mouse
   "Send mouse click to pane at x,y coordinates."

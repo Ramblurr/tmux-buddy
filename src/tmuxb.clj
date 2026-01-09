@@ -183,29 +183,57 @@
 ;;; Screen Hash Persistence
 ;;; ---------------------------------------------------------------------------
 
-(def hash-file (fs/path (fs/temp-dir) "tmuxb_screen_hashes.json"))
-
-(defn load-screen-hashes
-  "Load screen hashes from temp file."
-  []
-  (if (fs/exists? hash-file)
-    (try
-      (json/parse-string (slurp (str hash-file)) true)
-      (catch Exception _ {}))
-    {}))
-
-(defn save-screen-hash
-  "Save a screen hash to temp file."
-  [key hash-val]
-  (let [hashes (assoc (load-screen-hashes) (keyword key) hash-val)]
-    (spit (str hash-file) (json/generate-string hashes))))
-
 (defn md5-hash
   "Calculate MD5 hash of a string."
   [s]
   (let [md    (java.security.MessageDigest/getInstance "MD5")
         bytes (.digest md (.getBytes s "UTF-8"))]
     (apply str (map #(format "%02x" %) bytes))))
+
+(defn cache-dir
+  "Returns the XDG cache directory for tmux-buddy.
+  Uses $XDG_CACHE_HOME if set, otherwise falls back to $HOME/.cache."
+  []
+  (let [xdg-cache (System/getenv "XDG_CACHE_HOME")
+        base      (if (and xdg-cache (not (str/blank? xdg-cache)))
+                    xdg-cache
+                    (str (System/getenv "HOME") "/.cache"))]
+    (fs/path base "tmux-buddy")))
+
+(def hash-file (fs/path (cache-dir) "screen_hashes.edn"))
+
+(defn load-screen-hashes
+  "Load screen hashes from cache file."
+  []
+  (if (fs/exists? hash-file)
+    (try
+      (edn/read-string (slurp (str hash-file)))
+      (catch Exception _ {}))
+    {}))
+
+(defn save-screen-hash
+  "Save a screen hash to cache file."
+  [key hash-val]
+  (let [hashes (assoc (load-screen-hashes) key hash-val)]
+    (fs/create-dirs (cache-dir))
+    (spit (str hash-file) (pr-str hashes))))
+
+(defn get-socket-path
+  "Get the tmux server socket path by querying tmux."
+  []
+  (try
+    (let [result (p/sh ["tmux" "display-message" "-p" "#{socket_path}"])]
+      (if (zero? (:exit result))
+        (str/trim (:out result))
+        "default"))
+    (catch Exception _ "default")))
+
+(defn make-screen-hash-key
+  "Create a cache key that includes socket hash to prevent collisions
+  between different tmux servers."
+  [session pane]
+  (let [socket-hash (subs (md5-hash (get-socket-path)) 0 8)]
+    (str socket-hash ":" session ":" (or pane ""))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; tmux Format Generation
@@ -432,9 +460,9 @@
       ;; Check if changed
       (when if-changed
         (let [content-hash (md5-hash content)
-              pane-key     (str session ":" (or pane ""))
+              pane-key     (make-screen-hash-key session pane)
               hashes       (load-screen-hashes)]
-          (if (= (get hashes (keyword pane-key)) content-hash)
+          (if (= (get hashes pane-key) content-hash)
             (do (println "[no change]")
                 (System/exit 0))
             (save-screen-hash pane-key content-hash))))
@@ -629,6 +657,8 @@
   "Show help message."
   [_]
   (println "tmuxb - tmux-buddy CLI
+
+A CLI tool that enables humans or LLMs to interact with tmux sessions. 
 
 Commands:
   list                     List all tmux sessions

@@ -6,13 +6,14 @@
     devenv.url = "https://flakehub.com/f/ramblurr/nix-devenv/*";
   };
   outputs =
-    {
+    inputs@{
       self,
       devenv,
       devshell,
       ...
     }:
     devenv.lib.mkFlake ./. {
+      inherit inputs;
       withOverlays = [
         devshell.overlays.default
         devenv.overlays.default
@@ -25,12 +26,6 @@
             devenv.capsules.base
             devenv.capsules.clojure
           ];
-          # https://numtide.github.io/devshell
-          commands = [
-            { package = pkgs.cfssl; }
-            { package = pkgs.pebble; }
-          ];
-
         };
     };
 }

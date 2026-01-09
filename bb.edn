@@ -1,23 +1,41 @@
-{:paths ["src"]
+{:paths                                                                                                  ["src"]
  :tasks
- {test {:doc "Run test suite"
-        :extra-paths ["test"]
-        :extra-deps {io.github.cognitect-labs/test-runner
-                     {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
-        :task (exec 'cognitect.test-runner.api/test)
-        :exec-args {:dirs ["test"]}}
+ {:init
+  (do (def paths ["src" "test"]))
+  fmt
+  {:doc  "Format code with cljfmt"
+   :task (apply shell "cljfmt --quiet -v fix" (if (seq *command-line-args*) *command-line-args* paths))}
 
-  build {:doc "Generate uberscript from source"
-         :task (do
-                 (println "Building uberscript...")
-                 (babashka.fs/delete-if-exists "tmuxb")
-                 (shell "bb uberscript tmuxb src/tmuxb.clj")
-                 (let [content (slurp "tmuxb")]
-                   (spit "tmuxb" (str "#!/usr/bin/env bb\n" content)))
-                 (shell "chmod +x tmuxb")
-                 (println "Done. Generated: tmuxb"))}
+  fmt:check
+  {:doc  "Check code formatting without making changes"
+   :task (apply shell "cljfmt check " paths)}
 
-  install-hooks {:doc "Configure git to use .githooks directory"
-                 :task (do
-                         (shell "git config core.hooksPath .githooks")
-                         (println "Git hooks installed."))}}}
+  lint
+  {:doc  "Run the clj-kondo linter on the clojure code"
+   :task (if (seq *command-line-args*)
+           (apply shell "clj-kondo" "--lint" *command-line-args*)
+           (apply shell "clj-kondo --lint" paths))}
+  test
+  {:doc         "Run test suite"
+   :extra-paths ["test"]
+   :extra-deps  {io.github.cognitect-labs/test-runner
+                 {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :task        (exec 'cognitect.test-runner.api/test)
+   :exec-args   {:dirs ["test"]}}
+
+  build
+  {:doc  "Generate uberscript from source"
+   :task (do
+           (println "Building uberscript...")
+           (babashka.fs/delete-if-exists "tmuxb")
+           (shell "bb uberscript tmuxb src/tmuxb.clj")
+           (let [content (slurp "tmuxb")]
+             (spit "tmuxb" (str "#!/usr/bin/env bb\n" content)))
+           (shell "chmod +x tmuxb")
+           (println "Done. Generated: tmuxb"))}
+
+  install-hooks
+  {:doc  "Configure git to use .githooks directory"
+   :task (do
+           (shell "git config core.hooksPath .githooks")
+           (println "Git hooks installed."))}}}

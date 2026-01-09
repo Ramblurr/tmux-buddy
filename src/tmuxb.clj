@@ -711,20 +711,12 @@
 (defn cmd-kill
   "Kill a tmux session."
   [{:keys [opts]}]
-  (let [{:keys [session socket force]} opts]
+  (let [{:keys [session socket]} opts]
     (when-not session
       (exit-with-error "kill" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
-
-    (when-not force
-      (print (str "Kill session '" session "'? [y/N] "))
-      (flush)
-      (let [response (str/trim (read-line))]
-        (when-not (contains? #{"y" "Y" "yes" "Yes" "YES"} response)
-          (println "Aborted")
-          (System/exit 1))))
 
     (kill-session* session)
 
@@ -848,8 +840,7 @@ Commands:")
     :desc       "Kill a tmux session."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:socket {:alias :S :desc "tmux socket path"}
-                 :force  {:alias :f :coerce :boolean :desc "Kill without confirmation"}}}])
+    :spec       {:socket {:alias :S :desc "tmux socket path"}}}])
 
 (defn get-cmd-spec
   "Get the spec for a command by name."

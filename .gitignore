@@ -16,3 +16,4 @@ result
 .env
 .claude
 .brepl
+.tmuxb_session

@@ -38,4 +38,7 @@
   {:doc  "Configure git to use .githooks directory"
    :task (do
            (shell "git config core.hooksPath .githooks")
-           (println "Git hooks installed."))}}}
+           (println "Git hooks installed."))}
+  ci
+  {:doc     "Ran by the CI"
+   :depends [fmt:check lint test]}}}

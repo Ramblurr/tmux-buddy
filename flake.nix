@@ -17,6 +17,7 @@
         devshell.overlays.default
         devenv.overlays.default
       ];
+      package = pkgs: pkgs.callPackage ./package.nix { };
       devShell =
         pkgs:
         pkgs.devshell.mkShell {

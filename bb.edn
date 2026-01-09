@@ -1,4 +1,7 @@
-{:paths                                                                                                  ["src"]
+{:paths
+ ["src"]
+ :bbin/bin
+ {tmuxb {:main-opts ["-f" "tmuxb"]}}
  :tasks
  {:init
   (do (def paths ["src" "test"]))

@@ -64,8 +64,8 @@ There are a few niggles.
 
 For now I'm just living with the first one. Though switching to a non top-tier model can mitigate it, depending on the difficulty of your task.
 
-My short term goal is to have the agent help me in Emacs.
-In particular, I want to teach the agent to use [magit][magit] to be able to do complex interactive git staging operations.
+My short term goal is to have an llm help me in Emacs, and help drive some TUI applications in a testing situation.
+In particular, I want to teach the llm to use [magit][magit] to be able to do complex interactive git staging operations.
 
 [magit]: https://magit.vc/
 

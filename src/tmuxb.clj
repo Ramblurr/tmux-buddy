@@ -1,12 +1,14 @@
 #!/usr/bin/env bb
 (ns tmuxb
   "tmux-buddy - tmux interface for Claude Code."
-  (:require [babashka.cli :as cli]
-            [babashka.process :as p]
-            [babashka.fs :as fs]
-            [cheshire.core :as json]
-            [clojure.edn :as edn]
-            [clojure.string :as str]))
+  (:require
+   [babashka.cli :as cli]
+   [babashka.fs :as fs]
+   [babashka.process :as p]
+   [cheshire.core :as json]
+   [clojure.edn :as edn]
+   [clojure.string :as str]
+   [tmuxb.lib.send :as send]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ANSI Handling
@@ -365,7 +367,13 @@
   (let [target (if pane (str session ":" pane) session)
         args   (cond-> ["send-keys" "-t" target]
                  literal (conj "-l"))]
-    (apply tmux (conj args keys))))
+    (apply tmux (conj args "--" keys))))
+
+(defn send-keys-hex*
+  "Send hex-encoded bytes to a pane via tmux send-keys -H."
+  [session hex-string & {:keys [pane]}]
+  (let [target (if pane (str session ":" pane) session)]
+    (apply tmux "send-keys" "-t" target "-H" (str/split hex-string #" "))))
 
 (defn new-session*
   "Create a new tmux session."
@@ -557,43 +565,25 @@
               (recur content-hash))))))))
 
 (defn cmd-send
-  "Send keys to a pane."
+  "Send keys to a pane using EDN DSL.
+
+   Reads from stdin if no EDN arguments provided.
+   See doc/send-keys-dsl.md for DSL specification."
   [{:keys [opts args]}]
-  (let [{:keys [session pane literal enter]} opts
-        keys                                 (or args [])]
+  (let [{:keys [session pane]} opts
+        edn-str                (str/join " " (or args []))]
     (when-not session
       (exit-with-error "send" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
 
-    (let [key-string (str (str/join " " keys) (when enter " Enter"))]
-      (send-keys* session key-string :pane pane :literal literal)
-      (println (str "Sent: " key-string)))))
-
-(defn cmd-type
-  "Type text into a pane (literal characters)."
-  [{:keys [opts]}]
-  (let [{:keys [session text pane enter delay]
-         :or   {delay 0}}                      opts]
-    (when-not session
-      (exit-with-error "type" "session name required"))
-    (when-not text
-      (exit-with-error "type" "text required"))
-    (when-not (find-session session)
-      (binding [*out* *err*] (println (str "Session '" session "' not found")))
-      (System/exit 1))
-
-    (if (pos? delay)
-      (doseq [c text]
-        (send-keys* session (str c) :pane pane :literal true)
-        (Thread/sleep delay))
-      (send-keys* session text :pane pane :literal true))
-
-    (when enter
-      (send-keys* session "Enter" :pane pane))
-
-    (println (str "Typed: " (pr-str text) (when enter " + Enter")))))
+    (let [send-fn     #(send-keys* session % :pane pane)
+          send-hex-fn #(send-keys-hex* session % :pane pane)]
+      (if (str/blank? edn-str)
+        (with-open [rdr (java.io.PushbackReader. *in*)]
+          (send/execute-stream send-fn send-hex-fn rdr))
+        (send/execute-string send-fn send-hex-fn edn-str)))))
 
 (defn cmd-mouse
   "Send mouse click to pane at x,y coordinates."
@@ -736,22 +726,11 @@ Commands:")
                  :until    {:alias :u :desc "Stop when this text appears"}}}
 
    {:name       "send"
-    :usage      "SESSION [options] KEYS..."
-    :desc       "Send keys to a pane. Put options before KEYS."
+    :usage      "SESSION [options] [EDN...] or stdin"
+    :desc       "Send keys using EDN DSL. Reads from stdin if no args. See doc/send-keys-dsl.md"
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:pane    {:alias :p :desc "Pane ID or index"}
-                 :literal {:alias :l :coerce :boolean :desc "Send keys literally"}
-                 :enter   {:alias :e :coerce :boolean :desc "Append Enter key"}}}
-
-   {:name       "type"
-    :usage      "SESSION TEXT [options]"
-    :desc       "Type text into a pane (literal characters)."
-    :args->opts [:session :text]
-    :coerce     {:session :string :text :string}
-    :spec       {:pane  {:alias :p :desc "Pane ID or index"}
-                 :enter {:alias :e :coerce :boolean :desc "Press Enter after typing"}
-                 :delay {:alias :d :coerce :long :default 0 :desc "Delay between chars (ms)"}}}
+    :spec       {:pane {:alias :p :desc "Pane ID or index"}}}
 
    {:name       "mouse"
     :usage      "SESSION X Y [options]"
@@ -811,7 +790,6 @@ Commands:")
                      "capture" cmd-capture
                      "watch" cmd-watch
                      "send" cmd-send
-                     "type" cmd-type
                      "mouse" cmd-mouse
                      "new" cmd-new
                      "kill" cmd-kill)

@@ -220,6 +220,60 @@
     (fs/create-dirs (cache-dir))
     (spit (str hash-file) (pr-str hashes))))
 
+;;; ---------------------------------------------------------------------------
+;;; Session File Discovery
+;;; ---------------------------------------------------------------------------
+
+(defn find-session-file
+  "Walk up from cwd looking for .tmuxb_session file.
+  Returns the path if found, nil otherwise."
+  []
+  (loop [dir (fs/cwd)]
+    (let [f (fs/path dir ".tmuxb_session")]
+      (cond
+        (fs/exists? f)           f
+        (nil? (fs/parent dir))   nil
+        :else                    (recur (fs/parent dir))))))
+
+(defn read-session-file
+  "Read and parse .tmuxb_session file, returns nil if not found or invalid.
+  Expected format: {:session \"name\" :socket \"/path/to/socket\"}"
+  []
+  (when-let [f (find-session-file)]
+    (try
+      (edn/read-string (slurp (str f)))
+      (catch Exception _ nil))))
+
+(defn resolve-socket-path
+  "Resolve socket path. Bare names become $XDG_RUNTIME_DIR/tmuxb/name or /tmp/tmuxb/name.
+  Paths starting with /, ./, or ../ are used as-is."
+  [socket]
+  (when socket
+    (if (or (str/starts-with? socket "/")
+            (str/starts-with? socket "./")
+            (str/starts-with? socket "../"))
+      socket
+      (let [runtime-dir (or (System/getenv "XDG_RUNTIME_DIR") "/tmp")
+            dir         (fs/path runtime-dir "tmuxb")]
+        (fs/create-dirs dir)
+        (str (fs/path dir socket))))))
+
+(defn write-session-file
+  "Write .tmuxb_session file in cwd."
+  [session socket]
+  (let [content (cond-> {:session session}
+                  socket (assoc :socket socket))]
+    (spit ".tmuxb_session" (pr-str content))))
+
+(defn delete-session-file-if-matches
+  "Delete .tmuxb_session in cwd if it matches the given session/socket."
+  [session socket]
+  (when (fs/exists? ".tmuxb_session")
+    (let [current (read-session-file)]
+      (when (and (= (:session current) session)
+                 (= (:socket current) socket))
+        (fs/delete ".tmuxb_session")))))
+
 (defn get-socket-path
   "Get the tmux server socket path by querying tmux."
   []
@@ -295,19 +349,27 @@
 ;;; tmux Wrapper Functions
 ;;; ---------------------------------------------------------------------------
 
+(def ^:dynamic *socket*
+  "Dynamic var for tmux socket path. When set, all tmux commands use -S flag."
+  nil)
+
 (defn tmux
-  "Run tmux command, return stdout or throw on error."
+  "Run tmux command, return stdout or throw on error.
+  Uses *socket* if bound to specify the tmux server socket."
   [& args]
-  (let [result (p/sh (into ["tmux"] args))]
+  (let [base   (if *socket* ["tmux" "-S" *socket*] ["tmux"])
+        result (p/sh (into base args))]
     (if (zero? (:exit result))
       (:out result)
       (throw (ex-info (str "tmux error: " (:err result))
                       {:stderr (:err result) :args args})))))
 
 (defn tmux-ok?
-  "Run tmux command, return true if successful."
+  "Run tmux command, return true if successful.
+  Uses *socket* if bound to specify the tmux server socket."
   [& args]
-  (let [result (p/sh (into ["tmux"] args))]
+  (let [base   (if *socket* ["tmux" "-S" *socket*] ["tmux"])
+        result (p/sh (into base args))]
     (zero? (:exit result))))
 
 (defn parse-edn-lines
@@ -619,21 +681,37 @@
 (defn cmd-new
   "Create a new tmux session."
   [{:keys [opts]}]
-  (let [{:keys [name window cmd width height]
-         :or   {window "main" width 120 height 40}} opts]
+  (let [{:keys [name socket window cmd width height no-session-file force]
+         :or   {window "main" width 120 height 40}}                        opts
+        socket                                                             (resolve-socket-path socket)]
     (when-not name
       (exit-with-error "new" "session name required"))
-    (when (find-session name)
-      (binding [*out* *err*] (println (str "Session '" name "' already exists")))
-      (System/exit 1))
 
-    (new-session* name :window window :cmd cmd :width width :height height)
-    (println (str "Created session '" name "'"))))
+    ;; Check if .tmuxb_session already exists
+    (when (and (not no-session-file)
+               (not force)
+               (fs/exists? ".tmuxb_session"))
+      (exit-with-error "new" ".tmuxb_session already exists (use --force to overwrite)"))
+
+    ;; Check if session already exists on this server
+    (binding [*socket* socket]
+      (when (find-session name)
+        (binding [*out* *err*] (println (str "Session '" name "' already exists")))
+        (System/exit 1))
+
+      (new-session* name :window window :cmd cmd :width width :height height))
+
+    ;; Write session file unless --no-session-file
+    (when-not no-session-file
+      (write-session-file name socket))
+
+    (println (str "Created session '" name "'"
+                  (when socket (str " (socket: " socket ")"))))))
 
 (defn cmd-kill
   "Kill a tmux session."
   [{:keys [opts]}]
-  (let [{:keys [session force]} opts]
+  (let [{:keys [session socket force]} opts]
     (when-not session
       (exit-with-error "kill" "session name required"))
     (when-not (find-session session)
@@ -649,6 +727,10 @@
           (System/exit 1))))
 
     (kill-session* session)
+
+    ;; Delete .tmuxb_session if it matches this session
+    (delete-session-file-if-matches session socket)
+
     (println (str "Killed session '" session "'"))))
 
 (defn cmd-help
@@ -683,23 +765,26 @@ Commands:")
     :desc       "List all tmux sessions."
     :args->opts []
     :coerce     {}
-    :spec       {:json {:coerce :boolean :desc "Output as JSON"}
-                 :edn  {:coerce :boolean :desc "Output as EDN"}}}
+    :spec       {:socket {:alias :S :desc "tmux socket path"}
+                 :json   {:coerce :boolean :desc "Output as JSON"}
+                 :edn    {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "windows"
     :usage      "SESSION [options]"
     :desc       "List windows in a session."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:json {:coerce :boolean :desc "Output as JSON"}
-                 :edn  {:coerce :boolean :desc "Output as EDN"}}}
+    :spec       {:socket {:alias :S :desc "tmux socket path"}
+                 :json   {:coerce :boolean :desc "Output as JSON"}
+                 :edn    {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "panes"
     :usage      "SESSION [options]"
     :desc       "List panes in a session or window."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:window {:alias :w :desc "Window name or index"}
+    :spec       {:socket {:alias :S :desc "tmux socket path"}
+                 :window {:alias :w :desc "Window name or index"}
                  :json   {:coerce :boolean :desc "Output as JSON"}
                  :edn    {:coerce :boolean :desc "Output as EDN"}}}
 
@@ -708,7 +793,8 @@ Commands:")
     :desc       "Capture pane contents. Includes cursor position by default."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:pane       {:alias :p :desc "Pane ID or index"}
+    :spec       {:socket     {:alias :S :desc "tmux socket path"}
+                 :pane       {:alias :p :desc "Pane ID or index"}
                  :lines      {:alias :n :coerce :long :default 50 :desc "Number of history lines"}
                  :if-changed {:coerce :boolean :desc "Only output if screen changed"}
                  :history    {:alias :H :coerce :boolean :desc "Include scrollback history"}
@@ -720,7 +806,8 @@ Commands:")
     :desc       "Watch pane for changes, outputting only when content changes."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:pane     {:alias :p :desc "Pane ID or index"}
+    :spec       {:socket   {:alias :S :desc "tmux socket path"}
+                 :pane     {:alias :p :desc "Pane ID or index"}
                  :interval {:alias :i :coerce :double :default 0.5 :desc "Poll interval in seconds"}
                  :timeout  {:alias :t :coerce :double :default 30.0 :desc "Max time to watch"}
                  :until    {:alias :u :desc "Stop when this text appears"}}}
@@ -730,33 +817,39 @@ Commands:")
     :desc       "Send keys using EDN DSL. Reads from stdin if no args. See doc/send-keys-dsl.md"
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:pane {:alias :p :desc "Pane ID or index"}}}
+    :spec       {:socket {:alias :S :desc "tmux socket path"}
+                 :pane   {:alias :p :desc "Pane ID or index"}}}
 
    {:name       "mouse"
     :usage      "SESSION X Y [options]"
     :desc       "Send mouse click to pane at x,y coordinates."
     :args->opts [:session :x :y]
     :coerce     {:session :string :x :long :y :long}
-    :spec       {:pane   {:alias :p :desc "Pane ID or index"}
+    :spec       {:socket {:alias :S :desc "tmux socket path"}
+                 :pane   {:alias :p :desc "Pane ID or index"}
                  :click  {:default "left" :desc "Click type: left, right, middle"}
                  :double {:coerce :boolean :desc "Double click"}}}
 
    {:name       "new"
     :usage      "NAME [options]"
-    :desc       "Create a new tmux session."
+    :desc       "Create a new tmux session and .tmuxb_session file."
     :args->opts [:name]
     :coerce     {:name :string}
-    :spec       {:window {:alias :w :default "main" :desc "Initial window name"}
-                 :cmd    {:alias :c :desc "Initial command to run"}
-                 :width  {:coerce :long :default 120 :desc "Window width"}
-                 :height {:coerce :long :default 40 :desc "Window height"}}}
+    :spec       {:socket          {:alias :S :desc "tmux socket path"}
+                 :window          {:alias :w :default "main" :desc "Initial window name"}
+                 :cmd             {:alias :c :desc "Initial command to run"}
+                 :width           {:coerce :long :default 120 :desc "Window width"}
+                 :height          {:coerce :long :default 40 :desc "Window height"}
+                 :no-session-file {:coerce :boolean :desc "Don't create .tmuxb_session file"}
+                 :force           {:alias :f :coerce :boolean :desc "Overwrite existing .tmuxb_session"}}}
 
    {:name       "kill"
     :usage      "SESSION [options]"
     :desc       "Kill a tmux session."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:force {:alias :f :coerce :boolean :desc "Kill without confirmation"}}}])
+    :spec       {:socket {:alias :S :desc "tmux socket path"}
+                 :force  {:alias :f :coerce :boolean :desc "Kill without confirmation"}}}])
 
 (defn get-cmd-spec
   "Get the spec for a command by name."
@@ -777,6 +870,44 @@ Commands:")
         (print-cmd-help cmd-name usage desc (add-help-to-spec spec)))
       (cmd-fn m))))
 
+(defn looks-like-edn?
+  "Check if string looks like EDN (starts with quote, colon, bracket, etc.)"
+  [s]
+  (when (string? s)
+    (let [trimmed (str/trim s)]
+      (or (str/starts-with? trimmed "\"")
+          (str/starts-with? trimmed ":")
+          (str/starts-with? trimmed "[")
+          (str/starts-with? trimmed "{")
+          (str/starts-with? trimmed "(")
+          (re-matches #"^\d+$" trimmed)))))
+
+(defn wrap-with-session-file
+  "Wrap a command function to merge .tmuxb_session defaults into opts.
+  CLI opts take precedence over file values. Binds *socket* if provided.
+
+  If the parsed session looks like EDN and we have a default session from
+  .tmuxb_session, treats the parsed session as an arg instead."
+  [cmd-fn]
+  (fn [{:keys [opts args] :as m}]
+    (let [defaults       (read-session-file)
+          parsed-session (:session opts)
+          [session args] (cond
+                           (nil? parsed-session)
+                           [(:session defaults) args]
+
+                           (and (looks-like-edn? parsed-session)
+                                (:session defaults))
+                           [(:session defaults) (into [parsed-session] args)]
+
+                           :else
+                           [parsed-session args])
+          merged         (-> (merge defaults opts)
+                             (assoc :session session))
+          socket         (:socket merged)]
+      (binding [*socket* socket]
+        (cmd-fn (assoc m :opts merged :args args))))))
+
 (def dispatch-table
   (into
    [(into {:cmds [] :fn cmd-help})]
@@ -784,15 +915,15 @@ Commands:")
      {:cmds       [name]
       :fn         (wrap-with-help
                    (case name
-                     "list" cmd-list
-                     "windows" cmd-windows
-                     "panes" cmd-panes
-                     "capture" cmd-capture
-                     "watch" cmd-watch
-                     "send" cmd-send
-                     "mouse" cmd-mouse
-                     "new" cmd-new
-                     "kill" cmd-kill)
+                     "list"    (wrap-with-session-file cmd-list)
+                     "windows" (wrap-with-session-file cmd-windows)
+                     "panes"   (wrap-with-session-file cmd-panes)
+                     "capture" (wrap-with-session-file cmd-capture)
+                     "watch"   (wrap-with-session-file cmd-watch)
+                     "send"    (wrap-with-session-file cmd-send)
+                     "mouse"   (wrap-with-session-file cmd-mouse)
+                     "new"     cmd-new
+                     "kill"    (wrap-with-session-file cmd-kill))
                    name)
       :args->opts args->opts
       :coerce     coerce

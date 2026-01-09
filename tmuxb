@@ -385,6 +385,36 @@
   (tmux "kill-session" "-t" session))
 
 ;;; ---------------------------------------------------------------------------
+;;; CLI Help and Error Handling
+;;; ---------------------------------------------------------------------------
+
+;; Forward declarations for cmd-help and error handling
+(declare commands)
+(declare get-cmd-spec)
+(declare add-help-to-spec)
+
+(defn print-cmd-help
+  "Print help for a specific command."
+  [cmd-name usage desc spec]
+  (println (str "Usage: tmuxb " cmd-name " " usage))
+  (println)
+  (println desc)
+  (when (seq spec)
+    (println)
+    (println "Options:")
+    (println (cli/format-opts {:spec spec}))))
+
+(defn exit-with-error
+  "Print error message, show command help, and exit."
+  [cmd-name message]
+  (binding [*out* *err*]
+    (println (str "Error: " message))
+    (println)
+    (when-let [{:keys [usage desc spec]} (get-cmd-spec cmd-name)]
+      (print-cmd-help cmd-name usage desc (add-help-to-spec spec))))
+  (System/exit 1))
+
+;;; ---------------------------------------------------------------------------
 ;;; CLI Command Implementations
 ;;; ---------------------------------------------------------------------------
 
@@ -406,8 +436,7 @@
   [{:keys [opts]}]
   (let [{:keys [session json edn]} opts]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "windows" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -424,8 +453,7 @@
   [{:keys [opts]}]
   (let [{:keys [session window json edn]} opts]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "panes" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -444,8 +472,7 @@
   (let [{:keys [session pane lines if-changed history raw style]
          :or   {lines 50 style "none"}}                          opts]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "capture" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -505,8 +532,7 @@
   (let [{:keys [session pane interval timeout until]
          :or   {interval 0.5 timeout 30.0}}          opts]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "watch" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -537,8 +563,7 @@
   (let [{:keys [session pane literal enter]} opts
         keys                                 (or args [])]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "send" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -553,11 +578,9 @@
   (let [{:keys [session text pane enter delay]
          :or   {delay 0}}                      opts]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "type" "session name required"))
     (when-not text
-      (binding [*out* *err*] (println "Error: text required"))
-      (System/exit 1))
+      (exit-with-error "type" "text required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -579,11 +602,9 @@
   (let [{:keys [session x y pane click double]
          :or   {click "left"}}                 opts]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "mouse" "session name required"))
     (when-not (and x y)
-      (binding [*out* *err*] (println "Error: x and y coordinates required"))
-      (System/exit 1))
+      (exit-with-error "mouse" "x and y coordinates required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -612,8 +633,7 @@
   (let [{:keys [name window cmd width height]
          :or   {window "main" width 120 height 40}} opts]
     (when-not name
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "new" "session name required"))
     (when (find-session name)
       (binding [*out* *err*] (println (str "Session '" name "' already exists")))
       (System/exit 1))
@@ -626,8 +646,7 @@
   [{:keys [opts]}]
   (let [{:keys [session force]} opts]
     (when-not session
-      (binding [*out* *err*] (println "Error: session name required"))
-      (System/exit 1))
+      (exit-with-error "kill" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
@@ -643,37 +662,26 @@
     (kill-session* session)
     (println (str "Killed session '" session "'"))))
 
-(defn print-cmd-help
-  "Print help for a specific command."
-  [cmd-name usage desc spec]
-  (println (str "Usage: tmuxb " cmd-name " " usage))
-  (println)
-  (println desc)
-  (when (seq spec)
-    (println)
-    (println "Options:")
-    (println (cli/format-opts {:spec spec}))))
-
 (defn cmd-help
   "Show help message."
   [_]
-  (println "tmuxb - tmux-buddy CLI
+  (let [cmd-entries (for [{:keys [name usage desc]} commands]
+                      (let [args (-> usage
+                                     (str/replace #"\[?options\]?" "")
+                                     (str/replace #"\s+" " ")
+                                     str/trim)]
+                        {:cmd        (str name (when (seq args) (str " " args)))
+                         :short-desc (first (str/split desc #"\.\s*"))}))
+        max-width   (+ 2 (apply max (map #(count (:cmd %)) cmd-entries)))]
+    (println "tmuxb - tmux-buddy CLI
 
-A CLI tool that enables humans or LLMs to interact with tmux sessions. 
+A CLI tool that enables humans or LLMs to interact with tmux sessions.
 
-Commands:
-  list                     List all tmux sessions
-  windows SESSION          List windows in a session
-  panes SESSION            List panes in a session/window
-  capture SESSION          Capture pane contents
-  watch SESSION            Watch pane for changes
-  send SESSION KEYS...     Send keys to a pane
-  type SESSION TEXT        Type text into a pane
-  mouse SESSION X Y        Send mouse click to pane
-  new NAME                 Create a new tmux session
-  kill SESSION             Kill a tmux session
-
-Use -h or --help with any command for more options."))
+Commands:")
+    (doseq [{:keys [cmd short-desc]} cmd-entries]
+      (println (format (str "  %-" max-width "s %s") cmd short-desc)))
+    (println)
+    (println "Use -h or --help with any command for more options.")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; CLI Dispatch

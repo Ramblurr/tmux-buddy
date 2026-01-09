@@ -1,0 +1,16 @@
+{:paths ["src"]
+ :tasks
+ {build {:doc "Generate uberscript from source"
+         :task (do
+                 (println "Building uberscript...")
+                 (babashka.fs/delete-if-exists "tmuxb")
+                 (shell "bb uberscript tmuxb src/tmuxb.clj")
+                 (let [content (slurp "tmuxb")]
+                   (spit "tmuxb" (str "#!/usr/bin/env bb\n" content)))
+                 (shell "chmod +x tmuxb")
+                 (println "Done. Generated: tmuxb"))}
+
+  install-hooks {:doc "Configure git to use .githooks directory"
+                 :task (do
+                         (shell "git config core.hooksPath .githooks")
+                         (println "Git hooks installed."))}}}

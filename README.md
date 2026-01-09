@@ -8,9 +8,7 @@ Useful for:
 - TUI testing and automation
 - <your idea here>
 
-
 ## Requirements
-
 
 - [Babashka](https://babashka.org/)
 

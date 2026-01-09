@@ -363,18 +363,19 @@
   "List all tmux sessions."
   [{:keys [opts]}]
   (let [sessions (list-sessions*)]
-    (if (:json opts)
-      (println (json/generate-string sessions {:pretty true}))
-      (if (empty? sessions)
-        (println "No tmux sessions found")
-        (doseq [s sessions]
-          (let [attached (if (= (:attached s) 1) "*" "")]
-            (println (str (:name s) attached " (" (:windows s) " windows)"))))))))
+    (cond
+      (:json opts) (println (json/generate-string sessions {:pretty true}))
+      (:edn opts)  (prn sessions)
+      :else        (if (empty? sessions)
+                     (println "No tmux sessions found")
+                     (doseq [s sessions]
+                       (let [attached (if (= (:attached s) 1) "*" "")]
+                         (println (str (:name s) attached " (" (:windows s) " windows)"))))))))
 
 (defn cmd-windows
   "List windows in a session."
   [{:keys [opts]}]
-  (let [{:keys [session json]} opts]
+  (let [{:keys [session json edn]} opts]
     (when-not session
       (binding [*out* *err*] (println "Error: session name required"))
       (System/exit 1))
@@ -382,16 +383,17 @@
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
     (let [windows (list-windows* session)]
-      (if json
-        (println (json/generate-string windows {:pretty true}))
-        (doseq [w windows]
-          (let [active (if (= (:active w) 1) "*" "")]
-            (println (str (:index w) ": " (:name w) active " (" (:panes w) " panes)"))))))))
+      (cond
+        json (println (json/generate-string windows {:pretty true}))
+        edn  (prn windows)
+        :else (doseq [w windows]
+                (let [active (if (= (:active w) 1) "*" "")]
+                  (println (str (:index w) ": " (:name w) active " (" (:panes w) " panes)"))))))))
 
 (defn cmd-panes
   "List panes in a session/window."
   [{:keys [opts]}]
-  (let [{:keys [session window json]} opts]
+  (let [{:keys [session window json edn]} opts]
     (when-not session
       (binding [*out* *err*] (println "Error: session name required"))
       (System/exit 1))
@@ -399,12 +401,13 @@
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
     (let [panes (list-panes* session :window window)]
-      (if json
-        (println (json/generate-string panes {:pretty true}))
-        (doseq [p panes]
-          (let [active (if (= (:active p) 1) "*" "")]
-            (println (str (:id p) active " [" (:window p) ":" (:index p) "] "
-                          (:width p) "x" (:height p)))))))))
+      (cond
+        json  (println (json/generate-string panes {:pretty true}))
+        edn   (prn panes)
+        :else (doseq [p panes]
+                (let [active (if (= (:active p) 1) "*" "")]
+                  (println (str (:id p) active " [" (:window p) ":" (:index p) "] "
+                                (:width p) "x" (:height p)))))))))
 
 (defn cmd-capture
   "Capture pane contents."
@@ -652,14 +655,16 @@ Use -h or --help with any command for more options."))
     :desc       "List all tmux sessions."
     :args->opts []
     :coerce     {}
-    :spec       {:json {:coerce :boolean :desc "Output as JSON"}}}
+    :spec       {:json {:coerce :boolean :desc "Output as JSON"}
+                 :edn  {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "windows"
     :usage      "SESSION [options]"
     :desc       "List windows in a session."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:json {:coerce :boolean :desc "Output as JSON"}}}
+    :spec       {:json {:coerce :boolean :desc "Output as JSON"}
+                 :edn  {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "panes"
     :usage      "SESSION [options]"
@@ -667,7 +672,8 @@ Use -h or --help with any command for more options."))
     :args->opts [:session]
     :coerce     {:session :string}
     :spec       {:window {:alias :w :desc "Window name or index"}
-                 :json   {:coerce :boolean :desc "Output as JSON"}}}
+                 :json   {:coerce :boolean :desc "Output as JSON"}
+                 :edn    {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "capture"
     :usage      "SESSION [options]"

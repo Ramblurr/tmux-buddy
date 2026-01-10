@@ -11,7 +11,7 @@ When present, you can omit these from every command.
 
 ```bash
 # Simplest form - creates session on default tmux server
-./tmuxb new myproject
+tmuxb new myproject
 
 # The file contains:
 # {:session "myproject"}
@@ -21,10 +21,10 @@ If you need an isolated tmux server (separate from your normal tmux), use `-S`:
 
 ```bash
 # Creates session on a dedicated socket
-./tmuxb new -S myproject.sock myproject
+tmuxb new -S myproject.sock myproject
 
 # The file contains:
-# {:session "myproject", :socket "/run/user/1000/tmuxb/myproject.sock"}
+# {:session "myproject", :socket "/run/user/100tmuxb/myproject.sock"}
 ```
 
 ### Using the Session File
@@ -33,17 +33,17 @@ Once `.tmuxb_session` exists, commands automatically use it:
 
 ```bash
 # These all work without specifying session or socket:
-./tmuxb capture
-./tmuxb send -- '"echo hello" :Enter'
-./tmuxb list
+tmuxb capture
+tmuxb send -- '"echo hello" :Enter'
+tmuxb list
 ```
 
 You can still override with explicit arguments:
 
 ```bash
-./tmuxb capture other-session                # uses other-session instead
-./tmuxb capture -S /other/sock               # uses different socket
-./tmuxb capture -S /other/sock other-session # uses different socket and other-session
+tmuxb capture other-session                # uses other-session instead
+tmuxb capture -S /other/sock               # uses different socket
+tmuxb capture -S /other/sock other-session # uses different socket and other-session
 ```
 
 ### File Discovery
@@ -54,19 +54,19 @@ tmuxb walks up from the current directory looking for `.tmuxb_session`, similar 
 
 ```bash
 # Create session (writes .tmuxb_session)
-./tmuxb new -S dev.sock myproject
+tmuxb new -S dev.sock myproject
 
 # Work with session (no args needed)
-./tmuxb capture
-./tmuxb send -- '"make build" :Enter'
+tmuxb capture
+tmuxb send -- '"make build" :Enter'
 
 # Kill session (auto-deletes .tmuxb_session if it matches)
-./tmuxb kill myproject
+tmuxb kill myproject
 ```
 
 ### Flags for `new`
 
-- `-S, --socket` - Socket path (bare names go to $XDG_RUNTIME_DIR/tmuxb/)
+- `-S, --socket` - Socket path (bare names go to $XDG_RUNTIME_DItmuxb/)
 - `--no-session-file` - Don't create .tmuxb_session
 - `-f, --force` - Overwrite existing .tmuxb_session
 
@@ -76,10 +76,10 @@ Before sending any commands, always capture the current terminal state. The term
 
 ```bash
 # ALWAYS do this before sending commands
-./tmuxb capture
+tmuxb capture
 
 # Or with explicit session if no .tmuxb_session file:
-./tmuxb capture SESSION
+tmuxb capture SESSION
 ```
 
 Why? Because:
@@ -100,20 +100,20 @@ When you start an application (vim, emacs, python, etc.), verify it actually sta
 Bad pattern:
 ```bash
 # DON'T DO THIS - you have no idea if vim actually started
-./tmuxb send demo -- '"vim" :Enter [:Sleep 500] "i" "Hello"'
+tmuxb send demo -- '"vim" :Enter [:Sleep 500] "i" "Hello"'
 ```
 
 Good pattern:
 ```bash
 # Start vim
-./tmuxb send demo -- '"vim" :Enter'
+tmuxb send demo -- '"vim" :Enter'
 
 # Wait and verify vim is running
-./tmuxb capture demo
+tmuxb capture demo
 # Look for vim's interface in the output
 
 # Only then send more commands
-./tmuxb send demo -- '"i" "Hello"'
+tmuxb send demo -- '"i" "Hello"'
 ```
 
 This applies to any state transition:
@@ -130,7 +130,7 @@ Don't send extremely long command sequences without verification checkpoints. If
 Bad pattern:
 ```bash
 # 30+ seconds of commands with no verification
-./tmuxb send demo -- \
+tmuxb send demo -- \
   '"vim" :Enter [:Sleep 500] "i"' \
   '"line 1" :Enter [:Sleep 1000]' \
   '"line 2" :Enter [:Sleep 1000]' \
@@ -141,18 +141,18 @@ Bad pattern:
 Better pattern:
 ```bash
 # Start vim
-./tmuxb send demo -- '"vim" :Enter'
+tmuxb send demo -- '"vim" :Enter'
 sleep 1
 
 # Verify vim started
-./tmuxb capture demo
+tmuxb capture demo
 # Check output shows vim interface
 
 # Now send the content
-./tmuxb send demo -- '"i" "line 1" :Enter "line 2" :Enter'
+tmuxb send demo -- '"i" "line 1" :Enter "line 2" :Enter'
 
 # Verify periodically for long sequences
-./tmuxb capture demo
+tmuxb capture demo
 
 # Continue...
 ```
@@ -162,18 +162,18 @@ sleep 1
 Use `--` to separate tmuxb options from EDN arguments:
 
 ```bash
-./tmuxb send demo -- :C-x
-./tmuxb send demo -- '"hello" :Enter'
+tmuxb send demo -- :C-x
+tmuxb send demo -- '"hello" :Enter'
 ```
 
 For strings with special characters, use appropriate quoting:
 
 ```bash
 # Exclamation marks need $'...' quoting (bash history expansion)
-./tmuxb send demo -- $'"Hello!" :Enter'
+tmuxb send demo -- $'"Hello!" :Enter'
 
 # Or escape with backslash
-./tmuxb send demo -- '"Hello World\!" :Enter'
+tmuxb send demo -- '"Hello World\!" :Enter'
 ```
 
 ## Timing Considerations
@@ -181,7 +181,7 @@ For strings with special characters, use appropriate quoting:
 For repeated actions with delays:
 ```bash
 # Press down 5 times with 300ms between each
-./tmuxb send demo -- '[:Down 5 :delay 300]'
+tmuxb send demo -- '[:Down 5 :delay 300]'
 ```
 
 ## Working with Vim
@@ -190,23 +190,23 @@ Vim has modes. Always be aware of which mode you're in.
 
 ```bash
 # Capture first
-./tmuxb capture demo
+tmuxb capture demo
 
 # If in normal mode, enter insert mode before typing
-./tmuxb send demo -- '"i" "your text here"'
+tmuxb send demo -- '"i" "your text here"'
 
 # Return to normal mode
-./tmuxb send demo -- :Escape
+tmuxb send demo -- :Escape
 
 # Vim commands start with : in normal mode
-./tmuxb send demo -- '":w" :Enter'  # save
-./tmuxb send demo -- $'":q!" :Enter'  # quit without saving (note $'' for !)
+tmuxb send demo -- '":w" :Enter'  # save
+tmuxb send demo -- $'":q!" :Enter'  # quit without saving (note $'' for !)
 ```
 
 Verify mode transitions:
 ```bash
 # After escaping to normal mode, capture to verify
-./tmuxb capture demo
+tmuxb capture demo
 # Look for -- INSERT -- or similar mode indicator absence
 ```
 
@@ -216,13 +216,13 @@ Emacs uses modifier keys extensively:
 
 ```bash
 # C-x C-s to save
-./tmuxb send demo -- :C-x :C-s
+tmuxb send demo -- :C-x :C-s
 
 # M-x for command prompt
-./tmuxb send demo -- :M-x
+tmuxb send demo -- :M-x
 
 # Cancel with C-g
-./tmuxb send demo -- :C-g
+tmuxb send demo -- :C-g
 ```
 
 ## Example: Safe Vim Editing Session
@@ -231,36 +231,36 @@ Here's a complete example showing defensive practices. With a `.tmuxb_session` f
 
 ```bash
 # 1. Capture initial state
-./tmuxb capture
+tmuxb capture
 # Verify we're at a shell prompt
 
 # 2. Start vim
-./tmuxb send -- '"vim test.txt" :Enter'
+tmuxb send -- '"vim test.txt" :Enter'
 
 # 3. Wait and verify vim started
-./tmuxb capture
+tmuxb capture
 # Look for vim interface, check we're not still at shell
 
 # 4. Enter insert mode and type
-./tmuxb send -- '"i" "Hello World" :Enter "Line 2"'
+tmuxb send -- '"i" "Hello World" :Enter "Line 2"'
 
 # 5. Verify content was entered
-./tmuxb capture
+tmuxb capture
 # Check the text appears in the buffer
 
 # 6. Save and quit
-./tmuxb send -- ':Escape ":wq" :Enter'
+tmuxb send -- ':Escape ":wq" :Enter'
 
 # 7. Verify we're back at shell
-./tmuxb capture
+tmuxb capture
 # Confirm shell prompt is visible
 ```
 
 Without a session file, specify session explicitly:
 
 ```bash
-./tmuxb capture demo
-./tmuxb send demo -- '"vim test.txt" :Enter'
+tmuxb capture demo
+tmuxb send demo -- '"vim test.txt" :Enter'
 # etc.
 ```
 

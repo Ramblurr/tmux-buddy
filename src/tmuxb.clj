@@ -633,8 +633,8 @@
    Reads from stdin if no EDN arguments provided.
    See doc/send-keys-dsl.md for DSL specification."
   [{:keys [opts args]}]
-  (let [{:keys [session pane]} opts
-        edn-str                (str/join " " (or args []))]
+  (let [{:keys [session pane delay]} opts
+        edn-str                      (str/join " " (or args []))]
     (when-not session
       (exit-with-error "send" "session name required"))
     (when-not (find-session session)
@@ -643,7 +643,7 @@
 
     (let [send-fn     #(send-keys* session % :pane pane)
           send-hex-fn #(send-keys-hex* session % :pane pane)]
-      (send/run-send send-fn send-hex-fn edn-str *in*))))
+      (send/run-send send-fn send-hex-fn edn-str *in* delay))))
 
 (defn cmd-mouse
   "Send mouse click to pane at x,y coordinates."
@@ -811,7 +811,8 @@ Commands:")
     :args->opts [:session]
     :coerce     {:session :string}
     :spec       {:socket {:alias :S :desc "tmux socket path"}
-                 :pane   {:alias :p :desc "Pane ID or index"}}}
+                 :pane   {:alias :p :desc "Pane ID or index"}
+                 :delay  {:alias :d :coerce :long :default 30 :desc "Delay between actions in ms"}}}
 
    {:name       "mouse"
     :usage      "SESSION X Y [options]"

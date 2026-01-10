@@ -246,6 +246,13 @@ tmuxb send my-session '"make build" :Enter [:Sleep 2000] "make test" :Enter'
 echo '"hello" :Enter' | tmuxb send my-session
 ```
 
+By default, there's a 30ms delay between actions (simulating fast human typing). Adjust with `--delay`:
+
+```bash
+tmuxb send --delay 0 my-session '"fast"'     # No delay (as fast as possible)
+tmuxb send --delay 100 my-session '"slow"'   # 100ms between actions
+```
+
 ### Watching for Changes
 
 Watch a pane and output only when content changes:

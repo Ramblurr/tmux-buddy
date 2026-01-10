@@ -359,15 +359,26 @@
     (throw (ex-info "Unknown action type. Strings must be quoted in EDN format."
                     {:action action :type (type action)}))))
 
+(def default-delay
+  "Default delay in milliseconds between actions (simulates fast human typing)."
+  30)
+
 (defn execute
   "Execute a sequence of actions.
 
    send-fn     - function to send regular keys: (send-fn key-string)
    send-hex-fn - function to send hex bytes: (send-hex-fn hex-string)
-   actions     - sequence of actions (strings, keywords, vectors)"
-  [send-fn send-hex-fn actions]
-  (doseq [action actions]
-    (execute-action send-fn send-hex-fn action)))
+   actions     - sequence of actions (strings, keywords, vectors)
+   delay-ms    - delay in milliseconds between actions (default 30)"
+  ([send-fn send-hex-fn actions]
+   (execute send-fn send-hex-fn actions default-delay))
+  ([send-fn send-hex-fn actions delay-ms]
+   (let [action-vec (vec actions)
+         last-idx   (dec (count action-vec))]
+     (doseq [[idx action] (map-indexed vector action-vec)]
+       (execute-action send-fn send-hex-fn action)
+       (when (and (pos? delay-ms) (< idx last-idx))
+         (Thread/sleep delay-ms))))))
 
 (defn execute-stream
   "Execute actions from an EDN stream (e.g., stdin).
@@ -375,36 +386,45 @@
 
    send-fn     - function to send regular keys
    send-hex-fn - function to send hex bytes
-   reader      - a PushbackReader"
-  [send-fn send-hex-fn reader]
-  (loop []
-    (when-let [action (edn/read {:eof nil} reader)]
-      (execute-action send-fn send-hex-fn action)
-      (recur))))
+   reader      - a PushbackReader
+   delay-ms    - delay in milliseconds between actions (default 30)"
+  ([send-fn send-hex-fn reader]
+   (execute-stream send-fn send-hex-fn reader default-delay))
+  ([send-fn send-hex-fn reader delay-ms]
+   (loop [first? true]
+     (when-let [action (edn/read {:eof nil} reader)]
+       (when (and (not first?) (pos? delay-ms))
+         (Thread/sleep delay-ms))
+       (execute-action send-fn send-hex-fn action)
+       (recur false)))))
 
 (defn execute-string
   "Execute actions from an EDN string."
-  [send-fn send-hex-fn s]
-  (with-open [rdr (PushbackReader. (java.io.StringReader. s))]
-    (execute-stream send-fn send-hex-fn rdr)))
+  ([send-fn send-hex-fn s]
+   (execute-string send-fn send-hex-fn s default-delay))
+  ([send-fn send-hex-fn s delay-ms]
+   (with-open [rdr (PushbackReader. (java.io.StringReader. s))]
+     (execute-stream send-fn send-hex-fn rdr delay-ms))))
 
 (defn run-send
   "Execute send actions with clean error handling.
    Takes edn-str (may be blank) and stdin-reader for fallback.
    Returns nil on success, exits with code 1 on error."
-  [send-fn send-hex-fn edn-str stdin-reader]
-  (try
-    (if (str/blank? edn-str)
-      (with-open [rdr (PushbackReader. stdin-reader)]
-        (execute-stream send-fn send-hex-fn rdr))
-      (execute-string send-fn send-hex-fn edn-str))
-    (catch clojure.lang.ExceptionInfo e
-      (binding [*out* *err*]
-        (println (str "Error: " (ex-message e)))
-        (when-let [action (:action (ex-data e))]
-          (println (str "  Got: " (pr-str action) " (type: " (type action) ")")))
-        (println "  Hint: Strings must be quoted in EDN format, e.g., '\"echo hello\"'"))
-      (System/exit 1))))
+  ([send-fn send-hex-fn edn-str stdin-reader]
+   (run-send send-fn send-hex-fn edn-str stdin-reader default-delay))
+  ([send-fn send-hex-fn edn-str stdin-reader delay-ms]
+   (try
+     (if (str/blank? edn-str)
+       (with-open [rdr (PushbackReader. stdin-reader)]
+         (execute-stream send-fn send-hex-fn rdr delay-ms))
+       (execute-string send-fn send-hex-fn edn-str delay-ms))
+     (catch clojure.lang.ExceptionInfo e
+       (binding [*out* *err*]
+         (println (str "Error: " (ex-message e)))
+         (when-let [action (:action (ex-data e))]
+           (println (str "  Got: " (pr-str action) " (type: " (type action) ")")))
+         (println "  Hint: Strings must be quoted in EDN format, e.g., '\"echo hello\"'"))
+       (System/exit 1)))))
 
 (comment
   (defn mock-send [s] (println "send:" s))

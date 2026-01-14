@@ -726,6 +726,29 @@
 
     (println (str "Killed session '" session "'"))))
 
+(defn cmd-attach
+  "Attach to a tmux session interactively."
+  [{:keys [opts]}]
+  (let [{:keys [session socket read-only detach-other]} opts
+        session-data                                    (when-not session (read-session-file))
+        session                                         (or session (:session session-data))
+        socket                                          (resolve-socket-path (or socket (:socket session-data)))]
+    (when-not session
+      (exit-with-error "attach" "no session specified and no .tmuxb_session found"))
+
+    (binding [*socket* socket]
+      (when-not (find-session session)
+        (binding [*out* *err*] (println (str "Session '" session "' not found")))
+        (System/exit 1)))
+
+    (let [args (cond-> ["tmux"]
+                 socket (conj "-S" socket)
+                 :always (conj "attach-session" "-t" session)
+                 read-only (conj "-r")
+                 detach-other (conj "-d"))]
+      ;; Replace current process with tmux attach
+      (p/exec args))))
+
 (defn cmd-help
   "Show help message."
   [_]
@@ -754,7 +777,7 @@ Commands:")
 ;;; ---------------------------------------------------------------------------
 
 ;; Command specifications with help metadata
-(def commands-order ["new" "list" "capture" "send" "watch" "windows" "panes" "mouse"])
+(def commands-order ["new" "kill" "list" "capture" "send" "watch" "windows" "panes" "mouse" "attach"])
 (def commands
   [{:name       "list"
     :usage      "[options]"
@@ -840,6 +863,15 @@ Commands:")
                  :no-session-file {:coerce :boolean :desc "Don't create .tmuxb_session file"}
                  :force           {:alias :f :coerce :boolean :desc "Overwrite existing .tmuxb_session"}}}
 
+   {:name       "attach"
+    :usage      "[SESSION] [options]"
+    :desc       "Attach to a tmux session interactively (FOR HUMAN USE ONLY). Agents and LLMs must not use this command."
+    :args->opts [:session]
+    :coerce     {:session :string}
+    :spec       {:socket       {:alias :S :desc "tmux socket path"}
+                 :read-only    {:alias :r :coerce :boolean :desc "Attach in read-only mode"}
+                 :detach-other {:alias :d :coerce :boolean :desc "Detach other clients"}}}
+
    {:name       "kill"
     :usage      "SESSION [options]"
     :desc       "Kill a tmux session."
@@ -919,6 +951,7 @@ Commands:")
                      "send"    (wrap-with-session-file cmd-send)
                      "mouse"   (wrap-with-session-file cmd-mouse)
                      "new"     cmd-new
+                     "attach"  (wrap-with-session-file cmd-attach)
                      "kill"    (wrap-with-session-file cmd-kill))
                    name)
       :args->opts args->opts

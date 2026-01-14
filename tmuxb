@@ -1127,11 +1127,14 @@
     (when-not name
       (exit-with-error "new" "session name required"))
 
-    ;; Check if .tmuxb_session already exists
+    ;; Check if .tmuxb_session already exists and the session is still alive
     (when (and (not no-session-file)
                (not force)
                (fs/exists? ".tmuxb_session"))
-      (exit-with-error "new" ".tmuxb_session already exists (use --force to overwrite)"))
+      (let [existing (read-session-file)]
+        (binding [*socket* (resolve-socket-path (:socket existing))]
+          (when (find-session (:session existing))
+            (exit-with-error "new" ".tmuxb_session already exists (use --force to overwrite)")))))
 
     ;; Check if session already exists on this server
     (binding [*socket* socket]

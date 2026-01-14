@@ -789,7 +789,7 @@ Commands:")
                  :edn    {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "windows"
-    :usage      "SESSION [options]"
+    :usage      "[SESSION] [options]"
     :desc       "List windows in a session."
     :args->opts [:session]
     :coerce     {:session :string}
@@ -798,7 +798,7 @@ Commands:")
                  :edn    {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "panes"
-    :usage      "SESSION [options]"
+    :usage      "[SESSION] [options]"
     :desc       "List panes in a session or window."
     :args->opts [:session]
     :coerce     {:session :string}
@@ -808,7 +808,7 @@ Commands:")
                  :edn    {:coerce :boolean :desc "Output as EDN"}}}
 
    {:name       "capture"
-    :usage      "SESSION [options]"
+    :usage      "[SESSION] [options]"
     :desc       "Capture pane contents. Includes cursor position by default."
     :args->opts [:session]
     :coerce     {:session :string}
@@ -821,7 +821,7 @@ Commands:")
                  :style      {:alias :s :default "none" :desc "Style: none, lines, tags, ansi"}}}
 
    {:name       "watch"
-    :usage      "SESSION [options]"
+    :usage      "[SESSION] [options]"
     :desc       "Watch pane for changes, outputting only when content changes."
     :args->opts [:session]
     :coerce     {:session :string}
@@ -832,7 +832,7 @@ Commands:")
                  :until    {:alias :u :desc "Stop when this text appears"}}}
 
    {:name       "send"
-    :usage      "SESSION [options] [EDN...] or stdin"
+    :usage      "[SESSION] [options] [EDN...] or stdin"
     :desc       "Send keys using EDN DSL. Reads from stdin if no args. See doc/send-keys-dsl.md"
     :args->opts [:session]
     :coerce     {:session :string}
@@ -841,7 +841,7 @@ Commands:")
                  :delay  {:alias :d :coerce :long :default 30 :desc "Delay between actions in ms"}}}
 
    {:name       "mouse"
-    :usage      "SESSION X Y [options]"
+    :usage      "[SESSION] X Y [options]"
     :desc       "Send mouse click to pane at x,y coordinates."
     :args->opts [:session :x :y]
     :coerce     {:session :string :x :long :y :long}
@@ -873,7 +873,7 @@ Commands:")
                  :detach-other {:alias :d :coerce :boolean :desc "Detach other clients"}}}
 
    {:name       "kill"
-    :usage      "SESSION [options]"
+    :usage      "[SESSION] [options]"
     :desc       "Kill a tmux session."
     :args->opts [:session]
     :coerce     {:session :string}

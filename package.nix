@@ -7,7 +7,7 @@
 
 stdenv.mkDerivation rec {
   pname = "tmux-buddy";
-  version = "0.1.0";
+  version = "0.3.1";
   src = ./.;
   nativeBuildInputs = [ makeWrapper ];
   dontBuild = true;

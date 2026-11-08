@@ -307,15 +307,17 @@
    :attached [:int "session_attached"]})
 
 (def window-schema
-  {:name   [:str "window_name"]
-   :id     [:str "window_id"]
-   :index  [:int "window_index"]
-   :panes  [:int "window_panes"]
-   :active [:int "window_active"]})
+  {:name     [:str "window_name"]
+   :id       [:str "window_id"]
+   :index    [:int "window_index"]
+   :panes    [:int "window_panes"]
+   :active   [:int "window_active"]
+   :activity [:int "?window_activity,#{window_activity},nil"]})
 
 (def pane-schema
   {:id           [:str "pane_id"]
    :index        [:int "pane_index"]
+   :pid          [:int "pane_pid"]
    :window       [:str "window_name"]
    :window-index [:int "window_index"]
    :width        [:int "pane_width"]
@@ -405,6 +407,61 @@
     (-> (tmux "list-panes" "-t" target "-F" pane-format)
         parse-edn-lines)))
 
+(defn session-process-handles
+  "Snapshots each pane and its process handles across all windows in `session`."
+  [session]
+  (mapv (fn [pane]
+          (let [root (.orElse (java.lang.ProcessHandle/of (:pid pane)) nil)]
+            {:pane    pane
+             :handles (if root
+                        (with-open [stream (.descendants root)]
+                          (into [root] (iterator-seq (.iterator stream))))
+                        [])}))
+        (parse-edn-lines (tmux "list-panes" "-s" "-t" session "-F" pane-format))))
+
+(defn process-info
+  "Returns a process's PID, parent, command, start time, and working directory.
+  Working directories require Linux procfs; unreadable values are nil."
+  [handle]
+  (let [info    (.info handle)
+        parent  (.orElse (.parent handle) nil)
+        command (p/sh ["ps" "-ww" "-p" (str (.pid handle)) "-o" "args="])]
+    {:pid        (.pid handle)
+     :ppid       (when parent (.pid parent))
+     :command    (if (zero? (:exit command))
+                   (str/trim (:out command))
+                   (.orElse (.commandLine info) (.orElse (.command info) "unknown")))
+     :started-at (some-> (.orElse (.startInstant info) nil) str)
+     :cwd        (try (str (java.nio.file.Files/readSymbolicLink (fs/path "/proc" (str (.pid handle)) "cwd")))
+                      (catch Exception _ nil))}))
+
+(defn process-tree
+  "Builds a tree rooted at `pid` from a snapshot of `processes`."
+  [processes pid]
+  (when-let [process (first (filter #(= pid (:pid %)) processes))]
+    (assoc process :children
+           (mapv #(process-tree processes (:pid %))
+                 (sort-by :pid (filter #(= pid (:ppid %)) processes))))))
+
+(defn print-process-tree
+  "Prints a process tree with abbreviated home paths.
+  Limits each command to `width` characters, including an ellipsis; nil disables truncation."
+  [process depth width]
+  (let [command (:command process)
+        command (if (and width (> (count command) width))
+                  (str (subs command 0 (dec width)) "…")
+                  command)
+        cwd     (:cwd process)
+        home    (System/getProperty "user.home")
+        cwd     (cond
+                  (= cwd home) "~"
+                  (and cwd (str/starts-with? cwd (str home "/"))) (str "~" (subs cwd (count home)))
+                  :else (or cwd "unavailable"))]
+    (println (str (apply str (repeat depth "  ")) (:pid process) " " command
+                  " [cwd: " cwd "]")))
+  (doseq [child (:children process)]
+    (print-process-tree child (inc depth) width)))
+
 (defn capture-pane*
   "Capture pane contents."
   [session & {:keys [pane start end escape-sequences]}]
@@ -452,6 +509,17 @@
   "Kill a tmux session."
   [session]
   (tmux "kill-session" "-t" session))
+
+(defn kill-window*
+  "Kills a window in `session` by exact name, index, or ID.
+  Throws if the selector is missing or ambiguous. Linked windows are killed
+  in every session; killing the last window also removes its session."
+  [session window]
+  (let [matches (filter #(some #{(str window)} [(:name %) (str (:index %)) (:id %)])
+                        (list-windows* session))]
+    (when-not (= 1 (count matches))
+      (throw (ex-info "Window not found or ambiguous" {:session session :window window})))
+    (tmux "kill-window" "-t" (:id (first matches)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; CLI Help and Error Handling
@@ -516,7 +584,11 @@
         edn  (prn windows)
         :else (doseq [w windows]
                 (let [active (if (= (:active w) 1) "*" "")]
-                  (println (str (:index w) ": " (:name w) active " (" (:panes w) " panes)"))))))))
+                  (println (str (:index w) ": " (:name w) active " (" (:panes w) " panes)"
+                                " last activity: "
+                                (if (pos? (or (:activity w) 0))
+                                  (java.time.Instant/ofEpochSecond (:activity w))
+                                  "unknown")))))))))
 
 (defn cmd-panes
   "List panes in a session/window."
@@ -535,6 +607,25 @@
                 (let [active (if (= (:active p) 1) "*" "")]
                   (println (str (:id p) active " [" (:window p) ":" (:index p) "] "
                                 (:width p) "x" (:height p)))))))))
+
+(defn cmd-processes
+  "Lists process trees for every pane in a session."
+  [{:keys [opts]}]
+  (let [{:keys [session json edn width no-truncate]} opts]
+    (when-not session
+      (exit-with-error "processes" "no session specified and no .tmuxb_session found"))
+    (let [panes (mapv (fn [{:keys [pane handles]}]
+                        {:pane    pane
+                         :process (process-tree (mapv process-info handles) (:pid pane))})
+                      (session-process-handles session))]
+      (cond
+        json (println (json/generate-string panes {:pretty true}))
+        edn (prn panes)
+        :else (doseq [{:keys [pane process]} panes]
+                (println (str (:id pane) " [" (:window pane) ":" (:index pane) "]"))
+                (if process
+                  (print-process-tree process 1 (when-not no-truncate (or width 300)))
+                  (println "  process unavailable")))))))
 
 (defn cmd-capture
   "Capture pane contents."
@@ -710,21 +801,83 @@
                   (when socket (str " (socket: " socket ")"))))))
 
 (defn cmd-kill
-  "Kill a tmux session."
+  "Kills a session, or only the window selected by `:window` in `opts`."
   [{:keys [opts]}]
-  (let [{:keys [session socket]} opts]
+  (let [{:keys [session socket window]} opts]
     (when-not session
       (exit-with-error "kill" "session name required"))
     (when-not (find-session session)
       (binding [*out* *err*] (println (str "Session '" session "' not found")))
       (System/exit 1))
 
-    (kill-session* session)
+    (if window
+      (kill-window* session window)
+      (kill-session* session))
 
-    ;; Delete .tmuxb_session if it matches this session
-    (delete-session-file-if-matches session socket)
+    (when (or (nil? window) (not (find-session session)))
+      (delete-session-file-if-matches session socket))
 
-    (println (str "Killed session '" session "'"))))
+    (println (if window
+               (str "Killed window '" window "' in session '" session "'")
+               (str "Killed session '" session "'")))))
+
+(defn close-session*
+  "Sends SIGTERM to pane descendants, waits up to `timeout` seconds, and kills the session.
+  Returns surviving processes and signal errors. Pane roots receive tmux's hangup
+  when the session is killed. Processes detached before the snapshot are not tracked."
+  [session timeout]
+  (when-not (find-session session)
+    (throw (ex-info "Session not found" {:session session})))
+  (let [panes    (session-process-handles session)
+        handles  (vec (distinct (mapcat :handles panes)))
+        children (vec (distinct (mapcat #(rest (:handles %)) panes)))
+        current  (java.lang.ProcessHandle/current)]
+    (when (some #(= current %) handles)
+      (throw (ex-info "Run close from outside the target session to receive its survivor report"
+                      {:session session})))
+    (let [errors   (into []
+                         (keep (fn [handle]
+                                 (when (.isAlive handle)
+                                   (try
+                                     (when-not (.destroy handle)
+                                       (when (.isAlive handle)
+                                         {:pid (.pid handle) :error "SIGTERM was not delivered"}))
+                                     (catch Exception e
+                                       {:pid (.pid handle) :error (ex-message e)})))))
+                         (reverse children))
+          deadline (+ (System/nanoTime) (long (* timeout 1000000000)))]
+      (loop []
+        (when (and (some #(.isAlive %) children) (< (System/nanoTime) deadline))
+          (Thread/sleep 50)
+          (recur)))
+      (when (find-session session)
+        (kill-session* session))
+      ;; Allow tmux's hangup to be delivered before checking the original handles.
+      (Thread/sleep 100)
+      {:session       session
+       :survivors     (mapv process-info (filter #(.isAlive %) handles))
+       :signal-errors errors})))
+
+(defn cmd-close
+  "Closes a session and reports processes that survived."
+  [{:keys [opts]}]
+  (let [{:keys [session socket timeout json edn]} opts]
+    (when-not session
+      (exit-with-error "close" "session name required"))
+    (let [result (close-session* session (or timeout 5))]
+      (delete-session-file-if-matches session socket)
+      (cond
+        json (println (json/generate-string result {:pretty true}))
+        edn (prn result)
+        :else (do
+                (println (str "Closed session '" session "'"))
+                (doseq [{:keys [pid error]} (:signal-errors result)]
+                  (println (str "SIGTERM failed for " pid ": " error)))
+                (if (seq (:survivors result))
+                  (do (println "Surviving processes (not killed):")
+                      (doseq [process (:survivors result)]
+                        (print-process-tree process 1 300)))
+                  (println "No tracked processes remain.")))))))
 
 (defn cmd-attach
   "Attach to a tmux session interactively."
@@ -777,7 +930,7 @@ Commands:")
 ;;; ---------------------------------------------------------------------------
 
 ;; Command specifications with help metadata
-(def commands-order ["new" "kill" "list" "capture" "send" "watch" "windows" "panes" "mouse" "attach"])
+(def commands-order ["new" "kill" "close" "list" "capture" "send" "watch" "windows" "panes" "processes" "mouse" "attach"])
 (def commands
   [{:name       "list"
     :usage      "[options]"
@@ -790,12 +943,23 @@ Commands:")
 
    {:name       "windows"
     :usage      "[SESSION] [options]"
-    :desc       "List windows in a session."
+    :desc       "List windows with last activity (UTC; Unix seconds in JSON/EDN)."
     :args->opts [:session]
     :coerce     {:session :string}
     :spec       {:socket {:alias :S :desc "tmux socket path"}
                  :json   {:coerce :boolean :desc "Output as JSON"}
                  :edn    {:coerce :boolean :desc "Output as EDN"}}}
+
+   {:name       "processes"
+    :usage      "[SESSION] [options]"
+    :desc       "List process trees and working directories for every pane. Defaults to .tmuxb_session. Working directories require Linux procfs."
+    :args->opts [:session]
+    :coerce     {:session :string}
+    :spec       {:socket      {:alias :S :desc "tmux socket path"}
+                 :width       {:coerce :long :default 300 :validate pos? :desc "Maximum command characters in text output"}
+                 :no-truncate {:coerce :boolean :desc "Show full commands in text output"}
+                 :json        {:coerce :boolean :desc "Output as JSON (unabridged)"}
+                 :edn         {:coerce :boolean :desc "Output as EDN (unabridged)"}}}
 
    {:name       "panes"
     :usage      "[SESSION] [options]"
@@ -872,12 +1036,24 @@ Commands:")
                  :read-only    {:alias :r :coerce :boolean :desc "Attach in read-only mode"}
                  :detach-other {:alias :d :coerce :boolean :desc "Detach other clients"}}}
 
-   {:name       "kill"
+   {:name       "close"
     :usage      "[SESSION] [options]"
-    :desc       "Kill a tmux session."
+    :desc       "Send SIGTERM to pane child processes, wait, kill the session, and report survivors. Run outside the target session."
     :args->opts [:session]
     :coerce     {:session :string}
-    :spec       {:socket {:alias :S :desc "tmux socket path"}}}])
+    :spec       {:socket  {:alias :S :desc "tmux socket path"}
+                 :timeout {:coerce :double                            :default 5 :validate #(<= 0 % 3600)
+                           :desc   "Grace period in seconds (0–3600)"}
+                 :json    {:coerce :boolean :desc "Output as JSON"}
+                 :edn     {:coerce :boolean :desc "Output as EDN"}}}
+
+   {:name       "kill"
+    :usage      "[SESSION] [options]"
+    :desc       "Kill a session, or only a window with --window. Killing the last window removes the session. Linked windows are killed in every session."
+    :args->opts [:session]
+    :coerce     {:session :string}
+    :spec       {:socket {:alias :S :desc "tmux socket path"}
+                 :window {:alias :w :coerce :string :desc "Exact window name, index, or ID to kill"}}}])
 
 (defn get-cmd-spec
   "Get the spec for a command by name."
@@ -946,13 +1122,15 @@ Commands:")
                      "list"    (wrap-with-session-file cmd-list)
                      "windows" (wrap-with-session-file cmd-windows)
                      "panes"   (wrap-with-session-file cmd-panes)
+                     "processes" (wrap-with-session-file cmd-processes)
                      "capture" (wrap-with-session-file cmd-capture)
                      "watch"   (wrap-with-session-file cmd-watch)
                      "send"    (wrap-with-session-file cmd-send)
                      "mouse"   (wrap-with-session-file cmd-mouse)
                      "new"     cmd-new
                      "attach"  (wrap-with-session-file cmd-attach)
-                     "kill"    (wrap-with-session-file cmd-kill))
+                     "kill"    (wrap-with-session-file cmd-kill)
+                     "close"   (wrap-with-session-file cmd-close))
                    name)
       :args->opts args->opts
       :coerce     coerce

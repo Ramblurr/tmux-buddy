@@ -188,10 +188,50 @@ tmuxb list --json
 tmuxb list --edn
 ```
 
-Kill a session:
+Kill a session or one window:
 ```bash
 tmuxb kill my-session
+tmuxb kill my-session --window editor
+tmuxb kill my-session -w 2
+tmuxb kill my-session -w @17
 ```
+
+Window selectors accept an exact name, index, or ID. Missing or ambiguous selectors
+fail without killing anything. Killing the last window removes its session.
+Linked windows are killed in every session. The session file remains until the
+session is removed.
+
+### Processes and Graceful Shutdown
+
+```bash
+tmuxb processes my-session
+tmuxb processes my-session --json
+tmuxb processes                     # uses .tmuxb_session
+tmuxb processes --width 120
+tmuxb processes --no-truncate
+tmuxb close my-session
+tmuxb close my-session --timeout 10 --json
+```
+
+`processes` lists each pane's root process and descendants across all windows,
+including PIDs, commands, and working directories. Without a session argument, it
+uses `.tmuxb_session` or reports an error if none is found. Text output limits each
+command to 300 characters (including an ellipsis); `--width N` changes that limit
+and `--no-truncate` removes it. Home-directory paths use `~/`. JSON/EDN retains full
+commands and absolute paths. Working directories require
+Linux procfs; inaccessible directories appear as `unavailable` (JSON/EDN: `null`/`nil`).
+
+`close` sends SIGTERM to pane child processes, waits up to five seconds by default,
+then kills the session and reports survivors without sending SIGKILL. Pane root
+processes receive tmux's hangup when the session is killed. Run this command from
+outside the target session so it can finish its report. Applications may ignore
+signals or lose unsaved work; this is best-effort shutdown, not an application-specific
+save-and-exit command.
+
+The survivor report tracks the original process handles, including children that
+become orphaned during shutdown. It cannot identify processes detached before the
+snapshot or children spawned afterward. Linked windows can affect other sessions.
+JSON/EDN output includes `session`, `survivors`, and `signal-errors`.
 
 ### Capturing Pane Content
 
@@ -268,6 +308,10 @@ tmuxb watch my-session --until "Build complete"
 ```
 
 ### Listing Windows and Panes
+
+`windows` shows tmux's last window activity timestamp in UTC. JSON/EDN output
+includes `activity` as Unix seconds, or `null`/`nil` if tmux does not provide it.
+This tracks terminal activity, not CPU usage or whether a job has finished.
 
 ```bash
 # List windows in a session

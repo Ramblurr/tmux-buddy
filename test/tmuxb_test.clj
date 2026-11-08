@@ -49,6 +49,21 @@
   (testing "cursor row out of bounds returns content unchanged"
     (is (= "hello" (t/insert-cursor-marker "hello" 0 5)))))
 
+(deftest process-tree-display
+  (let [home    (System/getProperty "user.home")
+        process {:pid      42                                             :command "java -classpath very-long" :cwd (str home "/work")
+                 :children [{:pid 43 :command "child-command" :cwd home}]}]
+    (is (= "42 java… [cwd: ~/work]\n  43 chil… [cwd: ~]\n"
+           (with-out-str (t/print-process-tree process 0 5))))
+    (is (= "42 java -classpath very-long [cwd: ~/work]\n  43 child-command [cwd: ~]\n"
+           (with-out-str (t/print-process-tree process 0 nil))))
+    (is (= (str "42 java -classpath very-long [cwd: " home "-other/work]\n")
+           (with-out-str (t/print-process-tree
+                          (assoc process :cwd (str home "-other/work") :children []) 0 300))))
+    (is (= "42 … [cwd: unavailable]\n"
+           (with-out-str (t/print-process-tree
+                          (assoc process :cwd nil :children []) 0 1))))))
+
 (deftest schema->tmux-format-test
   (testing "str type produces quoted string with escaped quotes"
     (let [schema {:name [:str "session_name"]}

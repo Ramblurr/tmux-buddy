@@ -115,7 +115,7 @@ Add to your system configuration:
 
 ```nix
 {
-  inputs.tmux-buddy.url = "https://flakehub.com/f/ramblurr/tmux-buddy/*";
+  inputs.tmux-buddy.url = "github:ramblurr/tmux-buddy";
   # In your system packages:
   environment.systemPackages = with ; [
     inputs.tmux-buddy.packages.${pkgs.system}.default

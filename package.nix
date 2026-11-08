@@ -3,6 +3,8 @@
   stdenv,
   makeWrapper,
   babashka,
+  tmux,
+  procps,
 }:
 
 stdenv.mkDerivation rec {
@@ -11,6 +13,21 @@ stdenv.mkDerivation rec {
   src = ./.;
   nativeBuildInputs = [ makeWrapper ];
   dontBuild = true;
+  doCheck = true;
+  nativeCheckInputs = [ babashka tmux procps ];
+  checkPhase = ''
+    runHook preCheck
+    export HOME=$(mktemp -d)
+    export SHELL=${stdenv.shell}
+    unset TMUX
+    bb --classpath src:test -e "
+      (require '[clojure.test :as test]
+               'tmuxb-test 'tmuxb-integration-test 'tmuxb.lib.send-test)
+      (let [{:keys [fail error]} (test/run-tests
+                                 'tmuxb-test 'tmuxb-integration-test 'tmuxb.lib.send-test)]
+        (System/exit (if (zero? (+ fail error)) 0 1)))"
+    runHook postCheck
+  '';
   installPhase = ''
     runHook preInstall
     mkdir -p $out/bin

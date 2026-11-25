@@ -3,7 +3,6 @@
     "devenv": {
       "inputs": {
         "devshell": "devshell",
-        "flake-schemas": "flake-schemas",
         "flakelight": "flakelight",
         "home-manager": "home-manager",
         "nixpkgs": [
@@ -12,11 +11,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1794057851,
-        "narHash": "sha256-gwXL1XN92ltmdkLaYCLIL8RnvJ2d9MP3HM4e8iQpT7Q=",
+        "lastModified": 1795592186,
+        "narHash": "sha256-EwAP94TGJDTrbTNtvJK82u4hp8rYfQE3oiK5Ru6o1ZM=",
         "owner": "ramblurr",
         "repo": "nix-devenv",
-        "rev": "43267c683fa6d040cde3b7f2f8ef1a3c090b69a7",
+        "rev": "e78464b4f6b2e5ecdfdccebd2ed6bd90abec7a6a",
         "type": "github"
       },
       "original": {
@@ -64,20 +63,6 @@
         "owner": "numtide",
         "repo": "devshell",
         "type": "github"
-      }
-    },
-    "flake-schemas": {
-      "locked": {
-        "lastModified": 1770913512,
-        "narHash": "sha256-jRC1qRoRCrMjDalVfUMHFlKSkkA2q0RZWTDW0LsquoA=",
-        "rev": "3c464b0e09cb44c6e073c41dd1d834980c3e0b24",
-        "revCount": 111,
-        "type": "tarball",
-        "url": "https://api.flakehub.com/f/pinned/DeterminateSystems/flake-schemas/0.2.1/019c8ce4-cd63-7c3c-a4cf-d1e0788fdcd9/source.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://flakehub.com/f/DeterminateSystems/flake-schemas/0.2.0"
       }
     },
     "flakelight": {
